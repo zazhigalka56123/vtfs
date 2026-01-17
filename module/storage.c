@@ -234,6 +234,12 @@ struct vtfs_entry *vtfs_storage_create_entry_no_sync(struct vtfs_entry *parent,
 int vtfs_storage_delete_entry(struct vtfs_entry *entry)
 {
     unsigned long flags;
+    struct vtfs_entry *other;
+    ino_t ino;
+    char *shared_data = NULL;
+    int other_count = 0;
+    char path[512];
+    bool do_sync = false;
 
     if (!entry)
         return -EINVAL;
@@ -246,29 +252,41 @@ int vtfs_storage_delete_entry(struct vtfs_entry *entry)
 
     spin_lock_irqsave(&vtfs_store.lock, flags);
 
-    entry->nlink--;
+    ino = entry->ino;
+    shared_data = entry->data;
 
-    if (entry->nlink == 0) {
-        char path[512];
-        if (use_remote_server()) {
-            build_path(entry, path, sizeof(path));
+    if (use_remote_server()) {
+        build_path(entry, path, sizeof(path));
+        do_sync = true;
+    }
+
+    if (S_ISDIR(entry->mode) && entry->parent)
+        entry->parent->nlink--;
+
+    list_del(&entry->sibling);
+    list_del(&entry->global_list);
+
+    list_for_each_entry(other, &vtfs_store.all_entries, global_list) {
+        if (other->ino == ino) {
+            other->nlink--;
+            other_count++;
         }
-        
-        if (S_ISDIR(entry->mode) && entry->parent)
-            entry->parent->nlink--;
+    }
 
-        list_del(&entry->sibling);
-        list_del(&entry->global_list);
+    spin_unlock_irqrestore(&vtfs_store.lock, flags);
 
-        spin_unlock_irqrestore(&vtfs_store.lock, flags);
+    if (other_count == 0 && shared_data) {
+        kfree(shared_data);
+    }
 
-        free_entry(entry);
-        
-        if (use_remote_server()) {
-            sync_delete_to_server(path);
-        }
-    } else {
-        spin_unlock_irqrestore(&vtfs_store.lock, flags);
+    if (other_count > 0) {
+        entry->data = NULL;
+    }
+
+    kfree(entry);
+
+    if (do_sync) {
+        sync_delete_to_server(path);
     }
 
     return 0;
@@ -401,6 +419,9 @@ int vtfs_storage_add_link(struct vtfs_entry *entry,
                           const char *name)
 {
     unsigned long flags;
+    struct vtfs_entry *other;
+    ino_t ino;
+    unsigned int new_nlink;
 
     if (!entry || !parent)
         return -EINVAL;
@@ -409,7 +430,16 @@ int vtfs_storage_add_link(struct vtfs_entry *entry,
         return -EPERM;
 
     spin_lock_irqsave(&vtfs_store.lock, flags);
-    entry->nlink++;
+
+    ino = entry->ino;
+    new_nlink = entry->nlink + 1;
+
+    list_for_each_entry(other, &vtfs_store.all_entries, global_list) {
+        if (other->ino == ino) {
+            other->nlink = new_nlink;
+        }
+    }
+
     spin_unlock_irqrestore(&vtfs_store.lock, flags);
 
     return 0;

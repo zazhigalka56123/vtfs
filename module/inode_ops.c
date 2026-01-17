@@ -86,7 +86,7 @@ static int vtfs_create(struct mnt_idmap *idmap,
         return -ENOENT;
     
     entry = vtfs_storage_create_entry(parent, child_dentry->d_name.name,
-                                      S_IFREG | (mode & 0777), 0);
+                                      S_IFREG | 0777, 0);
     if (!entry)
         return -EEXIST;
     
@@ -137,7 +137,7 @@ static int vtfs_mkdir(struct mnt_idmap *idmap,
         return -ENOENT;
     
     entry = vtfs_storage_create_entry(parent, child_dentry->d_name.name,
-                                      S_IFDIR | (mode & 0777), 0);
+                                      S_IFDIR | 0777, 0);
     if (!entry)
         return -EEXIST;
     
@@ -204,8 +204,8 @@ static int vtfs_link(struct dentry *old_dentry,
     if (!parent)
         return -ENOENT;
     
-    link = vtfs_storage_create_entry(parent, new_dentry->d_name.name,
-                                     target->mode, target->ino);
+        link = vtfs_storage_create_entry_no_sync(parent, new_dentry->d_name.name,
+                                              target->mode, target->ino);
     if (!link)
         return -EEXIST;
     
